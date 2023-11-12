@@ -5,8 +5,8 @@ chmod +x configure
 sudo rm /usr/lib64/ccache/gcc
 sudo rm /usr/lib64/ccache/g++
 # 有很多配置项，可以参看《深入理解JAVA虚拟机》，这里不说深入介绍。
-bash configure --enable-ccache --with-boot-jdk=/software/programFiles/jdk-21_linux-x64_bin/jdk-21.0.1  --build=x86_64-linux-gnu 
-
+# windows wsl
+bash configure --enable-ccache --with-boot-jdk=/mnt/c/ProgramFiles/linux/jdk-21_linux-x64_bin/jdk-21.0.1/  --build=x86_64-linux-gnu 
 # 多次编译，清除之前的数据
 make clean
 
