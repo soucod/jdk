@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -88,7 +88,7 @@ import java.util.stream.Stream;
  * {@snippet lang = java:
  * Linker linker = Linker.nativeLinker();
  * MethodHandle strlen = linker.downcallHandle(
- *     linker.defaultLookup().find("strlen").orElseThrow(),
+ *     linker.defaultLookup().findOrThrow("strlen"),
  *     FunctionDescriptor.of(JAVA_LONG, ADDRESS)
  * );
  * }
@@ -306,7 +306,7 @@ import java.util.stream.Stream;
  * {@snippet lang = java:
  * Linker linker = Linker.nativeLinker();
  * MethodHandle qsort = linker.downcallHandle(
- *     linker.defaultLookup().find("qsort").orElseThrow(),
+ *     linker.defaultLookup().findOrThrow("qsort"),
  *         FunctionDescriptor.ofVoid(ADDRESS, JAVA_LONG, JAVA_LONG, ADDRESS)
  * );
  * }
@@ -397,12 +397,12 @@ import java.util.stream.Stream;
  * Linker linker = Linker.nativeLinker();
  *
  * MethodHandle malloc = linker.downcallHandle(
- *     linker.defaultLookup().find("malloc").orElseThrow(),
+ *     linker.defaultLookup().findOrThrow("malloc"),
  *     FunctionDescriptor.of(ADDRESS, JAVA_LONG)
  * );
  *
  * MethodHandle free = linker.downcallHandle(
- *     linker.defaultLookup().find("free").orElseThrow(),
+ *     linker.defaultLookup().findOrThrow("free"),
  *     FunctionDescriptor.ofVoid(ADDRESS)
  * );
  * }
@@ -530,7 +530,7 @@ import java.util.stream.Stream;
  * {@snippet lang = java:
  * Linker linker = Linker.nativeLinker();
  * MethodHandle printf = linker.downcallHandle(
- *     linker.defaultLookup().find("printf").orElseThrow(),
+ *     linker.defaultLookup().findOrThrow("printf"),
  *         FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT, JAVA_INT),
  *         Linker.Option.firstVariadicArg(1) // first int is variadic
  * );
@@ -598,7 +598,7 @@ public sealed interface Linker permits AbstractLinker {
      * <p>
      * Calling this method is equivalent to the following code:
      * {@snippet lang=java :
-     * linker.downcallHandle(function).bindTo(symbol);
+     * linker.downcallHandle(function, options).bindTo(address);
      * }
      *
      * @param address  the native memory segment whose
@@ -669,8 +669,13 @@ public sealed interface Linker permits AbstractLinker {
      * might attempt to access the contents of the segment. As such, one of the
      * exceptions specified by the {@link MemorySegment#get(ValueLayout.OfByte, long)} or
      * the {@link MemorySegment#copy(MemorySegment, long, MemorySegment, long, long)}
-     * methods may be thrown. The returned method handle will additionally throw
-     * {@link NullPointerException} if any argument passed to it is {@code null}.
+     * methods may be thrown. If an argument is a {@link MemorySegment} whose
+     * corresponding layout is an {@linkplain AddressLayout address layout}, the linker
+     * will throw an {@link IllegalArgumentException} if the segment is a heap memory
+     * segment, unless heap memory segments are explicitly allowed through the
+     * {@link Linker.Option#critical(boolean)} linker option. The returned method handle
+     * will additionally throw {@link NullPointerException} if any argument passed to it
+     * is {@code null}.
      *
      * @param function the function descriptor of the target foreign function
      * @param options  the linker options associated with this linkage request
@@ -853,7 +858,7 @@ public sealed interface Linker permits AbstractLinker {
          * try (Arena arena = Arena.ofConfined()) {
          *     MemorySegment capturedState = arena.allocate(capturedStateLayout);
          *     handle.invoke(capturedState);
-         *     int errno = (int) errnoHandle.get(capturedState);
+         *     int errno = (int) errnoHandle.get(capturedState, 0L);
          *     // use errno
          * }
          * }
@@ -914,9 +919,23 @@ public sealed interface Linker permits AbstractLinker {
          * <p>
          * Using this linker option when linking non-critical functions is likely to have
          * adverse effects, such as loss of performance or JVM crashes.
+         * <p>
+         * Critical functions can optionally allow access to the Java heap. This allows
+         * clients to pass heap memory segments as addresses, where normally only off-heap
+         * memory segments would be allowed. The memory region inside the Java heap is
+         * exposed through a temporary native address that is valid for the duration of
+         * the function call. Use of this mechanism is therefore only recommended when a
+         * function needs to do short-lived access to Java heap memory, and copying the
+         * relevant data to an off-heap memory segment would be prohibitive in terms of
+         * performance.
+         *
+         * @param allowHeapAccess whether the linked function should allow access to the
+         *                        Java heap.
          */
-        static Option critical() {
-            return LinkerOptions.Critical.INSTANCE;
+        static Option critical(boolean allowHeapAccess) {
+            return allowHeapAccess
+                ? LinkerOptions.Critical.ALLOW_HEAP
+                : LinkerOptions.Critical.DONT_ALLOW_HEAP;
         }
     }
 }
