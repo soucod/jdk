@@ -5,6 +5,8 @@
  * @compile/ref=DanglingDocCommentsClass.enabled.out -XDrawDiagnostics -Xlint:dangling-doc-comments DanglingDocCommentsClass.java
  */
 
+// This is a test of duplicate and misplaced doc comments in a class, using traditional comments
+
 /** Bad/Extra Class Comment. */
 /** Good Class Comment. */
 @Deprecated
@@ -43,4 +45,13 @@ public /** Misplaced: after mods. */ class DanglingDocCommentsClass /** Misplace
         /** Good comment. */
         int i = 0;
     }
+
+    /** Dangling comment X */
+
+    /**
+     * The {@code @SuppressWarnings} annotation below retroactively
+     * silences the warning about "Dangling comment X".
+     */
+    @SuppressWarnings("dangling-doc-comments")
+    public void m5() { }
 }

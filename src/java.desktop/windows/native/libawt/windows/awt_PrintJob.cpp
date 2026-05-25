@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -522,6 +522,7 @@ Java_sun_awt_windows_WPageDialogPeer__1show(JNIEnv *env, jobject peer)
     AwtComponent *awtParent = (parent != NULL) ? (AwtComponent *)JNI_GET_PDATA(parent) : NULL;
     HWND hwndOwner = awtParent ? awtParent->GetHWnd() : NULL;
 
+    jboolean doIt = JNI_FALSE;
     PAGESETUPDLG setup;
     memset(&setup, 0, sizeof(setup));
 
@@ -577,7 +578,7 @@ Java_sun_awt_windows_WPageDialogPeer__1show(JNIEnv *env, jobject peer)
          */
         if ((setup.hDevMode == NULL) && (setup.hDevNames == NULL)) {
             CLEANUP_SHOW;
-            return JNI_FALSE;
+            return doIt;
         }
     } else {
         int measure = PSD_INTHOUSANDTHSOFINCHES;
@@ -605,7 +606,7 @@ Java_sun_awt_windows_WPageDialogPeer__1show(JNIEnv *env, jobject peer)
     pageFormatToSetup(env, self, page, &setup, AwtPrintControl::getPrintDC(env, self));
     if (env->ExceptionCheck()) {
         CLEANUP_SHOW;
-        return JNI_FALSE;
+        return doIt;
     }
 
     setup.lpfnPageSetupHook = reinterpret_cast<LPPAGESETUPHOOK>(pageDlgHook);
@@ -619,7 +620,7 @@ Java_sun_awt_windows_WPageDialogPeer__1show(JNIEnv *env, jobject peer)
         jobject paper = getPaper(env, page);
         if (paper == NULL) {
             CLEANUP_SHOW;
-            return JNI_FALSE;
+            return doIt;
         }
         int units = setup.Flags & PSD_INTHOUSANDTHSOFINCHES ?
                                                 MM_HIENGLISH :
@@ -661,7 +662,7 @@ Java_sun_awt_windows_WPageDialogPeer__1show(JNIEnv *env, jobject peer)
         setPaperValues(env, paper, &paperSize, &margins, units);
         if (env->ExceptionCheck()) {
             CLEANUP_SHOW;
-            return JNI_FALSE;
+            return doIt;
          }
         /*
          * Put the updated Paper instance and the orientation into
@@ -670,7 +671,7 @@ Java_sun_awt_windows_WPageDialogPeer__1show(JNIEnv *env, jobject peer)
         setPaper(env, page, paper);
         if (env->ExceptionCheck()) {
             CLEANUP_SHOW;
-            return JNI_FALSE;
+            return doIt;
         }
         setPageFormatOrientation(env, page, orientation);
         if (env->ExceptionCheck()) {
@@ -684,12 +685,13 @@ Java_sun_awt_windows_WPageDialogPeer__1show(JNIEnv *env, jobject peer)
                     jboolean err = setPrintPaperSize(env, self, devmode->dmPaperSize);
                     if (err) {
                         CLEANUP_SHOW;
-                        return JNI_FALSE;
+                        return doIt;
                     }
                 }
             }
             ::GlobalUnlock(setup.hDevMode);
         }
+        doIt = JNI_TRUE;
     }
 
     AwtDialog::CheckUninstallModalHook();
@@ -708,7 +710,7 @@ Java_sun_awt_windows_WPageDialogPeer__1show(JNIEnv *env, jobject peer)
 
     CLEANUP_SHOW;
 
-    return JNI_TRUE;
+    return doIt;
 
     CATCH_BAD_ALLOC_RET(0);
 }
@@ -1521,6 +1523,7 @@ Java_sun_awt_windows_WPrinterJob_endDoc(JNIEnv *env, jobject self) {
     if (printDC != NULL){
         SAVE_CONTROLWORD
         ::EndDoc(printDC);
+        AwtPrintControl::setPrintDC(env, self, (HDC)NULL);
         RESTORE_CONTROLWORD
     }
 
@@ -1581,7 +1584,9 @@ Java_sun_awt_windows_WPrinterJob_deleteDC
 
     TRY_NO_VERIFY;
 
-    DeletePrintDC((HDC)dc);
+    if ((HDC)dc != NULL) {
+        DeletePrintDC((HDC)dc);
+    }
 
     if ((HGLOBAL)devmode != NULL){
          ::GlobalFree((HGLOBAL)devmode);
@@ -1784,8 +1789,8 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WEmbeddedFrame_printBand
 //     ::PatBlt(hDC, destX+1, destY+1, destWidth-2, destHeight-2, PATCOPY);
 //     ::SelectObject(hDC, oldBrush);
 
-    /* This code is rarely used now. It used to be invoked by Java plugin browser
-     * printing. Today embedded frames are used only when a toolkit such as SWT
+    /* This code is rarely used now.
+     * Today embedded frames are used only when a toolkit such as SWT
      * needs to embed
      */
     TRY;
@@ -1848,6 +1853,9 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_printBand
    jint width, jint height) {
 
     HDC printDC = AwtPrintControl::getPrintDC(env, self);
+    if ((HDC)printDC == NULL) {
+        return;
+    }
     doPrintBand(env, printDC, imageArray, x, y, width, height);
 }
 
@@ -1859,6 +1867,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_printBand
 JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_beginPath
 (JNIEnv *env , jobject self, jlong printDC) {
     TRY;
+
+    if ((HDC)printDC == NULL) {
+        return;
+    }
 
     (void) ::BeginPath((HDC)printDC);
 
@@ -1874,6 +1886,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_endPath
 (JNIEnv *env, jobject self, jlong printDC) {
     TRY;
 
+    if ((HDC)printDC == NULL) {
+        return;
+    }
+
     (void) ::EndPath((HDC)printDC);
 
     CATCH_BAD_ALLOC;
@@ -1887,6 +1903,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_endPath
 JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_fillPath
 (JNIEnv *env, jobject self, jlong printDC) {
     TRY;
+
+    if ((HDC)printDC == NULL) {
+        return;
+    }
 
     (void) ::FillPath((HDC)printDC);
 
@@ -1902,6 +1922,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_closeFigure
 (JNIEnv *env, jobject self, jlong printDC) {
     TRY;
 
+    if ((HDC)printDC == NULL) {
+        return;
+    }
+
     (void) ::CloseFigure((HDC)printDC);
 
     CATCH_BAD_ALLOC;
@@ -1915,6 +1939,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_closeFigure
 JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_lineTo
 (JNIEnv *env, jobject self, jlong printDC, jfloat x, jfloat y) {
     TRY;
+
+    if ((HDC)printDC == NULL) {
+        return;
+    }
 
     (void) ::LineTo((HDC)printDC, ROUND_TO_LONG(x), ROUND_TO_LONG(y));
 
@@ -1930,6 +1958,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_lineTo
 JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_moveTo
 (JNIEnv *env, jobject self, jlong printDC, jfloat x, jfloat y) {
     TRY;
+
+    if ((HDC)printDC == NULL) {
+        return;
+    }
 
     (void) ::MoveToEx((HDC)printDC, ROUND_TO_LONG(x), ROUND_TO_LONG(y), NULL);
 
@@ -1948,6 +1980,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_polyBezierTo
  jfloat endX, jfloat endY) {
 
     TRY;
+
+    if ((HDC)printDC == NULL) {
+        return;
+    }
 
     POINT points[3];
 
@@ -1972,6 +2008,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_setPolyFillMode
 (JNIEnv *env, jobject self, jlong printDC, jint fillRule) {
     TRY;
 
+    if ((HDC)printDC == NULL) {
+        return;
+    }
+
     (void) ::SetPolyFillMode((HDC)printDC, fillRule);
 
     CATCH_BAD_ALLOC;
@@ -1985,6 +2025,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_setPolyFillMode
 JNIEXPORT jint JNICALL Java_sun_awt_windows_WPrinterJob_setAdvancedGraphicsMode
 (JNIEnv *env, jobject self, jlong printDC) {
     TRY;
+
+    if ((HDC)printDC == NULL) {
+        return 0;
+    }
 
     int oldGraphicsMode = ::SetGraphicsMode((HDC)printDC, GM_ADVANCED);
     DASSERT(oldGraphicsMode != 0);
@@ -2002,6 +2046,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_setGraphicsMode
 (JNIEnv *env, jobject self, jlong printDC, jint mode) {
     TRY;
 
+    if ((HDC)printDC == NULL) {
+        return;
+    }
+
     int oldGraphicsMode = ::SetGraphicsMode((HDC)printDC, mode);
     DASSERT(oldGraphicsMode != 0);
 
@@ -2016,6 +2064,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_setGraphicsMode
 JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_scale
 (JNIEnv *env, jobject self, jlong printDC, jdouble scaleX, jdouble scaleY) {
     TRY;
+
+    if ((HDC)printDC == NULL) {
+        return;
+    }
 
     XFORM xForm;
 
@@ -2040,6 +2092,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_scale
 JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_getWorldTransform
 (JNIEnv* env, jobject self, jlong printDC, jdoubleArray transform) {
     TRY;
+
+    if ((HDC)printDC == NULL) {
+        return;
+    }
 
     double elems[6];
     XFORM xForm;
@@ -2067,6 +2123,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_getWorldTransform
 JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_setWorldTransform
 (JNIEnv* env, jobject self, jlong printDC, jdoubleArray transform) {
     TRY;
+
+    if ((HDC)printDC == NULL) {
+        return;
+    }
 
     double *elems;
     XFORM xForm;
@@ -2098,6 +2158,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_selectSolidBrush
 
     TRY;
 
+    if ((HDC)printDC == NULL) {
+        return;
+    }
+
     HBRUSH colorBrush = ::CreateSolidBrush(RGB(red, green, blue));
     HBRUSH oldBrush = (HBRUSH)::SelectObject((HDC)printDC, colorBrush);
     DeleteObject(oldBrush);
@@ -2114,6 +2178,10 @@ JNIEXPORT jint JNICALL Java_sun_awt_windows_WPrinterJob_getPenX
 (JNIEnv *env, jobject self, jlong printDC) {
 
     TRY;
+
+    if ((HDC)printDC == NULL) {
+        return 0;
+    }
 
     POINT where;
     ::GetCurrentPositionEx((HDC)printDC, &where);
@@ -2133,6 +2201,10 @@ JNIEXPORT jint JNICALL Java_sun_awt_windows_WPrinterJob_getPenY
 
     TRY;
 
+    if ((HDC)printDC == NULL) {
+        return 0;
+    }
+
     POINT where;
     ::GetCurrentPositionEx((HDC)printDC, &where);
 
@@ -2151,6 +2223,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_selectClipPath
 
     TRY;
 
+    if ((HDC)printDC == NULL) {
+        return;
+    }
+
     ::SelectClipPath((HDC)printDC, RGN_COPY);
 
     CATCH_BAD_ALLOC;
@@ -2167,6 +2243,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_frameRect
  jfloat x, jfloat y, jfloat width, jfloat height) {
 
   TRY;
+
+  if ((HDC)printDC == NULL) {
+      return;
+  }
 
   POINT points[5];
 
@@ -2198,6 +2278,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_fillRect
 
   TRY;
 
+  if ((HDC)printDC == NULL) {
+      return;
+  }
+
   RECT rect;
   rect.left = ROUND_TO_LONG(x);
   rect.top = ROUND_TO_LONG(y);
@@ -2226,6 +2310,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_selectPen
 
   TRY;
 
+  if ((HDC)printDC == NULL) {
+       return;
+  }
+
   HPEN hpen =  ::CreatePen(PS_SOLID, ROUND_TO_LONG(width),
                            RGB(red, green, blue));
 
@@ -2251,6 +2339,10 @@ JNIEXPORT jboolean JNICALL Java_sun_awt_windows_WPrinterJob_selectStylePen
  jint red, jint green, jint blue) {
 
   TRY;
+
+  if ((HDC)printDC == NULL) {
+      return JNI_FALSE;
+  }
 
   LOGBRUSH logBrush;
 
@@ -2285,6 +2377,10 @@ JNIEXPORT jboolean JNICALL Java_sun_awt_windows_WPrinterJob_setFont
    jfloat fontSize, jboolean isBold, jboolean isItalic, jint rotation,
    jfloat awScale)
 {
+    if ((HDC)printDC == NULL) {
+        return JNI_FALSE;
+    }
+
     jboolean didSetFont = JNI_FALSE;
 
     didSetFont = jFontToWFontW(env, (HDC)printDC,
@@ -2314,6 +2410,10 @@ static jboolean jFontToWFontW(JNIEnv *env, HDC printDC, jstring fontName,
     LOGFONTW lf;
     LOGFONTW matchedLogFont;
     BOOL foundFont = false;     // Assume we didn't find a matching GDI font.
+
+    if ((HDC)printDC == NULL) {
+        return JNI_FALSE;
+    }
 
     memset(&matchedLogFont, 0, sizeof(matchedLogFont));
 
@@ -2476,6 +2576,10 @@ static int embolden(int currentWeight)
 JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_setTextColor
 (JNIEnv *env, jobject self, jlong printDC, jint red, jint green, jint blue) {
 
+    if ((HDC)printDC == NULL) {
+        return;
+    }
+
     (void) ::SetTextColor( (HDC)printDC, RGB(red, green, blue));
 
 }
@@ -2483,6 +2587,11 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_setTextColor
 JNIEXPORT jint JNICALL Java_sun_awt_windows_WPrinterJob_getGDIAdvance
     (JNIEnv *env, jobject self, jlong printDC, jstring text)
 {
+
+    if ((HDC)printDC == NULL) {
+        return 0;
+    }
+
     SIZE size;
     LPCWSTR wText = JNU_GetStringPlatformChars(env, text, NULL);
     CHECK_NULL_RETURN(wText, 0);
@@ -2536,6 +2645,9 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_textOut
 (JNIEnv *env, jobject self, jlong printDC, jstring text, jint strLen,
      jboolean glyphCodes, jfloat x, jfloat y, jfloatArray positions)
 {
+    if ((HDC)printDC == NULL) {
+        return;
+    }
 
     long posX = ROUND_TO_LONG(x);
     long posY = ROUND_TO_LONG(y);
@@ -2830,6 +2942,10 @@ JNIEXPORT void JNICALL Java_sun_awt_windows_WPrinterJob_drawDIBImage
    jfloat srcWidth, jfloat srcHeight,
    jint bitCount, jbyteArray bmiColorsArray) {
 
+    if ((HDC)printDC == NULL) {
+        return;
+    }
+
     int result = 0;
 
     assert(printDC != NULL);
@@ -2920,6 +3036,10 @@ static void doPrintBand(JNIEnv *env, HDC printDC, jbyteArray imageArray,
 
     TRY;
 
+    if ((HDC)printDC == NULL) {
+         return;
+    }
+
     jbyte *image = NULL;
     try {
         long scanLineStride = J2DRasterBPP * width;
@@ -2963,6 +3083,10 @@ static void doPrintBand(JNIEnv *env, HDC printDC, jbyteArray imageArray,
 static int bitsToDevice(HDC printDC, jbyte *image, long destX, long destY,
                         long width, long height) {
     int result = 0;
+
+    if ((HDC)printDC == NULL) {
+        return result;
+    }
 
     assert(printDC != NULL);
     assert(image != NULL);
@@ -3704,6 +3828,10 @@ static double convertToPoints(long value, int units) {
  *      object 'self'.
  */
 void setCapabilities(JNIEnv *env, jobject self, HDC printDC) {
+
+    if ((HDC)printDC == NULL) {
+        return;
+    }
 
     jboolean err;
     // width of page in pixels

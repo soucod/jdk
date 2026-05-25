@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "classfile/classLoaderData.hpp"
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/barrierSetAssembler.hpp"
@@ -269,21 +268,6 @@ void BarrierSetAssembler::tlab_allocate(MacroAssembler* masm, Register obj,
   // verify_tlab();
 }
 
-void BarrierSetAssembler::incr_allocated_bytes(MacroAssembler* masm,
-                                               Register var_size_in_bytes,
-                                               int con_size_in_bytes,
-                                               Register t1) {
-  assert(t1->is_valid(), "need temp reg");
-
-  __ ldr(t1, Address(rthread, in_bytes(JavaThread::allocated_bytes_offset())));
-  if (var_size_in_bytes->is_valid()) {
-    __ add(t1, t1, var_size_in_bytes);
-  } else {
-    __ add(t1, t1, con_size_in_bytes);
-  }
-  __ str(t1, Address(rthread, in_bytes(JavaThread::allocated_bytes_offset())));
-}
-
 static volatile uint32_t _patching_epoch = 0;
 
 address BarrierSetAssembler::patching_epoch_addr() {
@@ -291,7 +275,7 @@ address BarrierSetAssembler::patching_epoch_addr() {
 }
 
 void BarrierSetAssembler::increment_patching_epoch() {
-  Atomic::inc(&_patching_epoch);
+  AtomicAccess::inc(&_patching_epoch);
 }
 
 void BarrierSetAssembler::clear_patching_epoch() {
@@ -300,10 +284,6 @@ void BarrierSetAssembler::clear_patching_epoch() {
 
 void BarrierSetAssembler::nmethod_entry_barrier(MacroAssembler* masm, Label* slow_path, Label* continuation, Label* guard) {
   BarrierSetNMethod* bs_nm = BarrierSet::barrier_set()->barrier_set_nmethod();
-
-  if (bs_nm == nullptr) {
-    return;
-  }
 
   Label local_guard;
   Label skip_barrier;
@@ -351,13 +331,7 @@ void BarrierSetAssembler::nmethod_entry_barrier(MacroAssembler* masm, Label* slo
     __ ldr(rscratch2, thread_disarmed_and_epoch_addr);
     __ cmp(rscratch1, rscratch2);
   } else {
-    assert(patching_type == NMethodPatchingType::conc_data_patch, "must be");
-    // Subsequent loads of oops must occur after load of guard value.
-    // BarrierSetNMethod::disarm sets guard with release semantics.
-    __ membar(__ LoadLoad);
-    Address thread_disarmed_addr(rthread, in_bytes(bs_nm->thread_disarmed_guard_value_offset()));
-    __ ldrw(rscratch2, thread_disarmed_addr);
-    __ cmpw(rscratch1, rscratch2);
+    ShouldNotReachHere();
   }
   __ br(condition, barrier_target);
 
@@ -377,11 +351,6 @@ void BarrierSetAssembler::nmethod_entry_barrier(MacroAssembler* masm, Label* slo
 }
 
 void BarrierSetAssembler::c2i_entry_barrier(MacroAssembler* masm) {
-  BarrierSetNMethod* bs = BarrierSet::barrier_set()->barrier_set_nmethod();
-  if (bs == nullptr) {
-    return;
-  }
-
   Label bad_call;
   __ cbz(rmethod, bad_call);
 
@@ -390,7 +359,7 @@ void BarrierSetAssembler::c2i_entry_barrier(MacroAssembler* masm) {
   __ load_method_holder_cld(rscratch1, rmethod);
 
   // Is it a strong CLD?
-  __ ldrw(rscratch2, Address(rscratch1, ClassLoaderData::keep_alive_offset()));
+  __ ldrw(rscratch2, Address(rscratch1, ClassLoaderData::keep_alive_ref_count_offset()));
   __ cbnz(rscratch2, method_live);
 
   // Is it a weak but alive CLD?
@@ -429,14 +398,18 @@ void BarrierSetAssembler::check_oop(MacroAssembler* masm, Register obj, Register
 OptoReg::Name BarrierSetAssembler::encode_float_vector_register_size(const Node* node, OptoReg::Name opto_reg) {
   switch (node->ideal_reg()) {
     case Op_RegF:
+    case Op_RegI: // RA may place scalar values (Op_RegI/N/L/P) in FP registers when UseFPUForSpilling is enabled
+    case Op_RegN:
       // No need to refine. The original encoding is already fine to distinguish.
-      assert(opto_reg % 4 == 0, "Float register should only occupy a single slot");
+      assert(opto_reg % 4 == 0, "32-bit register should only occupy a single slot");
       break;
     // Use different encoding values of the same fp/vector register to help distinguish different sizes.
     // Such as V16. The OptoReg::name and its corresponding slot value are
     // "V16": 64, "V16_H": 65, "V16_J": 66, "V16_K": 67.
     case Op_RegD:
     case Op_VecD:
+    case Op_RegL:
+    case Op_RegP:
       opto_reg &= ~3;
       opto_reg |= 1;
       break;
@@ -468,6 +441,11 @@ OptoReg::Name BarrierSetAssembler::refine_register(const Node* node, OptoReg::Na
   return opto_reg;
 }
 
+void BarrierSetAssembler::try_resolve_weak_handle_in_c2(MacroAssembler* masm, Register obj, Register tmp, Label& slow_path) {
+  // Load the oop from the weak handle.
+  __ ldr(obj, Address(obj));
+}
+
 #undef __
 #define __ _masm->
 
@@ -476,7 +454,7 @@ void SaveLiveRegisters::initialize(BarrierStubC2* stub) {
   GrowableArray<RegisterData> registers;
   VMReg prev_vm_reg = VMRegImpl::Bad();
 
-  RegMaskIterator rmi(stub->live());
+  RegMaskIterator rmi(stub->preserve_set());
   while (rmi.has_next()) {
     OptoReg::Name opto_reg = rmi.next();
     VMReg vm_reg = OptoReg::as_VMReg(opto_reg);
@@ -491,7 +469,7 @@ void SaveLiveRegisters::initialize(BarrierStubC2* stub) {
         index = registers.append(reg_data);
       }
     } else if (vm_reg->is_FloatRegister()) {
-      // We have size encoding in OptoReg of stub->live()
+      // We have size encoding in OptoReg of stub->preserve_set()
       // After encoding, float/neon/sve register has only one slot in regmask
       // Decode it to get the actual size
       VMReg vm_reg_base = vm_reg->as_FloatRegister()->as_VMReg();
@@ -532,12 +510,8 @@ void SaveLiveRegisters::initialize(BarrierStubC2* stub) {
     }
   }
 
-  // Remove C-ABI SOE registers, scratch regs and _ref register that will be updated
-  if (stub->result() != noreg) {
-    _gp_regs -= RegSet::range(r19, r30) + RegSet::of(r8, r9, stub->result());
-  } else {
-    _gp_regs -= RegSet::range(r19, r30) + RegSet::of(r8, r9);
-  }
+  // Remove C-ABI SOE registers and scratch regs
+  _gp_regs -= RegSet::range(r19, r30) + RegSet::of(r8, r9);
 
   // Remove C-ABI SOE fp registers
   _fp_regs -= FloatRegSet::range(v8, v15);

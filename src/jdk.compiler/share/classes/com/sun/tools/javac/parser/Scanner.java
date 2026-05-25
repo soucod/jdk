@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,8 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Queue;
 
+import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
+import com.sun.tools.javac.util.JCDiagnostic.LintWarning;
 import com.sun.tools.javac.util.Position.LineMap;
 import static com.sun.tools.javac.parser.Tokens.*;
 
@@ -125,7 +127,7 @@ public class Scanner implements Lexer {
             if (token.comments != null) {
                 for (var c : token.comments) {
                     switch (c.getStyle()) {
-                        case JAVADOC -> {
+                        case JAVADOC_BLOCK, JAVADOC_LINE -> {
                             docComments.add(c);
                         }
                     }
@@ -148,6 +150,11 @@ public class Scanner implements Lexer {
     @Override
     public Queue<Comment> getDocComments() {
         return docComments;
+    }
+
+    @Override
+    public void lintWarning(DiagnosticPosition pos, LintWarning key) {
+        tokenizer.log.warning(pos, key);
     }
 
     public int errPos() {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,9 +30,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.lang.reflect.Field;
+
 import javax.lang.model.element.Element;
-import javax.lang.model.element.PackageElement;
-import javax.lang.model.element.TypeElement;
 
 import com.sun.source.doctree.DocTree;
 import com.sun.source.doctree.UnknownBlockTagTree;
@@ -66,7 +67,7 @@ public class ToolGuide implements Taglet {
 
     static final String TAG_NAME = "toolGuide";
 
-    static final String BASE_URL = "../specs/man";
+    static final String BASE_URL = "specs/man";
 
     static final Pattern TAG_PATTERN = Pattern.compile("(?s)(?<name>[A-Za-z0-9]+)\\s*(?<label>.*)$");
 
@@ -105,8 +106,11 @@ public class ToolGuide implements Taglet {
                 continue;
             }
 
-            UnknownBlockTagTree blockTag = (UnknownBlockTagTree)tag;
-            String tagText = blockTag.getContent().toString().trim();
+            UnknownBlockTagTree blockTag = (UnknownBlockTagTree) tag;
+            String tagText = blockTag.getContent().stream()
+                    .map(Object::toString)
+                    .collect(Collectors.joining())
+                    .trim();
             Matcher m = TAG_PATTERN.matcher(tagText);
             if (m.matches()) {
                 String name = m.group("name");
@@ -114,9 +118,10 @@ public class ToolGuide implements Taglet {
                 if (label.isEmpty()) {
                     label = name;
                 }
+                String rootParent = currentPath().replaceAll("[^/]+", "..");
 
                 String url = String.format("%s/%s/%s.html",
-                        docRoot(elem), BASE_URL, name);
+                        rootParent, BASE_URL, name);
 
                 if (needComma) {
                     sb.append(",\n");
@@ -137,29 +142,21 @@ public class ToolGuide implements Taglet {
         return sb.toString();
     }
 
-    private String docRoot(Element elem) {
-        switch (elem.getKind()) {
-            case MODULE:
-                return "..";
+    private static ThreadLocal<String> CURRENT_PATH = null;
 
-            case PACKAGE:
-                PackageElement pe = (PackageElement)elem;
-                String pkgPart = pe.getQualifiedName()
-                        .toString()
-                        .replace('.', '/')
-                        .replaceAll("[^/]+", "..");
-                return pe.getEnclosingElement() != null
-                        ? "../" + pkgPart
-                        : pkgPart;
-            case CLASS:
-                TypeElement te = (TypeElement)elem;
-                return te.getQualifiedName()
-                        .toString()
-                        .replace('.', '/')
-                        .replaceAll("[^/]+", "..");
-
-            default:
-                throw new IllegalArgumentException(elem.getKind().toString());
+    private String currentPath() {
+        if (CURRENT_PATH == null) {
+            try {
+                Field f = Class.forName("jdk.javadoc.internal.doclets.formats.html.HtmlDocletWriter")
+                               .getField("CURRENT_PATH");
+                @SuppressWarnings("unchecked")
+                ThreadLocal<String> tl = (ThreadLocal<String>) f.get(null);
+                CURRENT_PATH = tl;
+            } catch (ReflectiveOperationException e) {
+                throw new RuntimeException("Cannot determine current path", e);
+            }
         }
+        return CURRENT_PATH.get();
     }
+
 }

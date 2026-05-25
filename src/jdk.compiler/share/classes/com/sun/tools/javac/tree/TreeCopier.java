@@ -257,9 +257,14 @@ public class TreeCopier<P> implements TreeVisitor<JCTree,P> {
 
     @DefinedBy(Api.COMPILER_TREE)
     public JCTree visitImport(ImportTree node, P p) {
-        JCImport t = (JCImport) node;
-        JCFieldAccess qualid = copy(t.qualid, p);
-        return M.at(t.pos).Import(qualid, t.staticImport);
+        if (node instanceof JCModuleImport mimp) {
+            JCExpression module = copy(mimp.module, p);
+            return M.at(mimp.pos).ModuleImport(module);
+        } else {
+            JCImport t = (JCImport) node;
+            JCFieldAccess qualid = copy(t.qualid, p);
+            return M.at(t.pos).Import(qualid, t.staticImport);
+        }
     }
 
     @DefinedBy(Api.COMPILER_TREE)
@@ -476,6 +481,12 @@ public class TreeCopier<P> implements TreeVisitor<JCTree,P> {
     }
 
     @DefinedBy(Api.COMPILER_TREE)
+    public JCTree visitVarType(VarTypeTree node, P p) {
+        JCVarType t = (JCVarType) node;
+        return M.at(t.pos).VarType();
+    }
+
+    @DefinedBy(Api.COMPILER_TREE)
     public JCTree visitTypeParameter(TypeParameterTree node, P p) {
         JCTypeParameter t = (JCTypeParameter) node;
         List<JCAnnotation> annos = copy(t.annotations, p);
@@ -546,7 +557,7 @@ public class TreeCopier<P> implements TreeVisitor<JCTree,P> {
         JCExpression vartype = copy(t.vartype, p);
         if (t.nameexpr == null) {
             JCExpression init = copy(t.init, p);
-            return M.at(t.pos).VarDef(mods, t.name, vartype, init);
+            return M.at(t.pos).VarDef(mods, t.name, vartype, init, t.declKind);
         } else {
             JCExpression nameexpr = copy(t.nameexpr, p);
             return M.at(t.pos).ReceiverVarDef(mods, nameexpr, vartype);

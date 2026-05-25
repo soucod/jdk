@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2020, 2023, Huawei Technologies Co., Ltd. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -23,7 +23,6 @@
  *
  */
 
-#include "precompiled.hpp"
 #include "classfile/classLoaderData.hpp"
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/barrierSetAssembler.hpp"
@@ -211,21 +210,6 @@ void BarrierSetAssembler::tlab_allocate(MacroAssembler* masm, Register obj,
   }
 }
 
-void BarrierSetAssembler::incr_allocated_bytes(MacroAssembler* masm,
-                                               Register var_size_in_bytes,
-                                               int con_size_in_bytes,
-                                               Register tmp1) {
-  assert(tmp1->is_valid(), "need temp reg");
-
-  __ ld(tmp1, Address(xthread, in_bytes(JavaThread::allocated_bytes_offset())));
-  if (var_size_in_bytes->is_valid()) {
-    __ add(tmp1, tmp1, var_size_in_bytes);
-  } else {
-    __ add(tmp1, tmp1, con_size_in_bytes);
-  }
-  __ sd(tmp1, Address(xthread, in_bytes(JavaThread::allocated_bytes_offset())));
-}
-
 static volatile uint32_t _patching_epoch = 0;
 
 address BarrierSetAssembler::patching_epoch_addr() {
@@ -233,7 +217,7 @@ address BarrierSetAssembler::patching_epoch_addr() {
 }
 
 void BarrierSetAssembler::increment_patching_epoch() {
-  Atomic::inc(&_patching_epoch);
+  AtomicAccess::inc(&_patching_epoch);
 }
 
 void BarrierSetAssembler::clear_patching_epoch() {
@@ -242,12 +226,7 @@ void BarrierSetAssembler::clear_patching_epoch() {
 
 void BarrierSetAssembler::nmethod_entry_barrier(MacroAssembler* masm, Label* slow_path, Label* continuation, Label* guard) {
   BarrierSetNMethod* bs_nm = BarrierSet::barrier_set()->barrier_set_nmethod();
-
-  if (bs_nm == nullptr) {
-    return;
-  }
-
-  Assembler::IncompressibleRegion ir(masm);  // Fixed length: see entry_barrier_offset()
+  Assembler::IncompressibleScope scope(masm); // Fixed length: see entry_barrier_offset()
 
   Label local_guard;
   NMethodPatchingType patching_type = nmethod_patching_type();
@@ -262,10 +241,6 @@ void BarrierSetAssembler::nmethod_entry_barrier(MacroAssembler* masm, Label* slo
   __ lwu(t0, *guard);
 
   switch (patching_type) {
-    case NMethodPatchingType::conc_data_patch:
-      // Subsequent loads of oops must occur after load of guard value.
-      // BarrierSetNMethod::disarm sets guard with release semantics.
-      __ membar(MacroAssembler::LoadLoad); // fall through to stw_instruction_and_data_patch
     case NMethodPatchingType::stw_instruction_and_data_patch:
       {
         // With STW patching, no data or instructions are updated concurrently,
@@ -280,7 +255,7 @@ void BarrierSetAssembler::nmethod_entry_barrier(MacroAssembler* masm, Label* slo
       }
     case NMethodPatchingType::conc_instruction_and_data_patch:
       {
-        // If we patch code we need both a code patching and a loadload
+        // If we patch code we need both a cmodx fence and a loadload
         // fence. It's not super cheap, so we use a global epoch mechanism
         // to hide them in a slow path.
         // The high level idea of the global epoch mechanism is to detect
@@ -288,11 +263,19 @@ void BarrierSetAssembler::nmethod_entry_barrier(MacroAssembler* masm, Label* slo
         // last nmethod was disarmed. This implies that the required
         // fencing has been performed for all preceding nmethod disarms
         // as well. Therefore, we do not need any further fencing.
+
         __ la(t1, ExternalAddress((address)&_patching_epoch));
-        // Embed an artificial data dependency to order the guard load
-        // before the epoch load.
-        __ srli(ra, t0, 32);
-        __ orr(t1, t1, ra);
+        if (!UseZtso) {
+          // Embed a synthetic data dependency between the load of the guard and
+          // the load of the epoch. This guarantees that these loads occur in
+          // order, while allowing other independent instructions to be reordered.
+          // Note: This may be slower than using a membar(load|load) (fence r,r).
+          // Because processors will not start the second load until the first comes back.
+          // This means you can't overlap the two loads,
+          // which is stronger than needed for ordering (stronger than TSO).
+          __ srli(ra, t0, 32);
+          __ orr(t1, t1, ra);
+        }
         // Read the global epoch value.
         __ lwu(t1, t1);
         // Combine the guard value (low order) with the epoch value (high order).
@@ -328,11 +311,6 @@ void BarrierSetAssembler::nmethod_entry_barrier(MacroAssembler* masm, Label* slo
 }
 
 void BarrierSetAssembler::c2i_entry_barrier(MacroAssembler* masm) {
-  BarrierSetNMethod* bs = BarrierSet::barrier_set()->barrier_set_nmethod();
-  if (bs == nullptr) {
-    return;
-  }
-
   Label bad_call;
   __ beqz(xmethod, bad_call);
 
@@ -341,7 +319,7 @@ void BarrierSetAssembler::c2i_entry_barrier(MacroAssembler* masm) {
   __ load_method_holder_cld(t0, xmethod);
 
   // Is it a strong CLD?
-  __ lwu(t1, Address(t0, ClassLoaderData::keep_alive_offset()));
+  __ lwu(t1, Address(t0, ClassLoaderData::keep_alive_ref_count_offset()));
   __ bnez(t1, method_live);
 
   // Is it a weak but alive CLD?
@@ -391,12 +369,17 @@ OptoReg::Name BarrierSetAssembler::refine_register(const Node* node, OptoReg::Na
   return opto_reg;
 }
 
+void BarrierSetAssembler::try_resolve_weak_handle_in_c2(MacroAssembler* masm, Register obj, Register tmp, Label& slow_path) {
+  // Load the oop from the weak handle.
+  __ ld(obj, Address(obj));
+}
+
 #undef __
 #define __ _masm->
 
 void SaveLiveRegisters::initialize(BarrierStubC2* stub) {
   // Record registers that needs to be saved/restored
-  RegMaskIterator rmi(stub->live());
+  RegMaskIterator rmi(stub->preserve_set());
   while (rmi.has_next()) {
     const OptoReg::Name opto_reg = rmi.next();
     if (OptoReg::is_reg(opto_reg)) {
@@ -414,12 +397,8 @@ void SaveLiveRegisters::initialize(BarrierStubC2* stub) {
     }
   }
 
-  // Remove C-ABI SOE registers, tmp regs and _ref register that will be updated
-  if (stub->result() != noreg) {
-    _gp_regs -= RegSet::range(x18, x27) + RegSet::of(x2) + RegSet::of(x8, x9) + RegSet::of(x5, stub->result());
-  } else {
-    _gp_regs -= RegSet::range(x18, x27) + RegSet::of(x2, x5) + RegSet::of(x8, x9);
-  }
+  // Remove C-ABI SOE registers and tmp regs
+  _gp_regs -= RegSet::range(x18, x27) + RegSet::of(x2, x5) + RegSet::of(x8, x9);
 }
 
 SaveLiveRegisters::SaveLiveRegisters(MacroAssembler* masm, BarrierStubC2* stub)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -267,6 +267,13 @@ public interface Tree {
         PRIMITIVE_TYPE(PrimitiveTypeTree.class),
 
         /**
+         * Used for instances of {@link VarTypeTree}.
+         *
+         * @since 27
+         */
+        VAR_TYPE(VarTypeTree.class),
+
+        /**
          * Used for instances of {@link ReturnTree}.
          */
         RETURN(ReturnTree.class),
@@ -284,7 +291,7 @@ public interface Tree {
         /**
          * Used for instances of {@link SwitchExpressionTree}.
          *
-         * @since 12
+         * @since 14
          */
         SWITCH_EXPRESSION(SwitchExpressionTree.class),
 
@@ -702,7 +709,7 @@ public interface Tree {
         /**
          * Used for instances of {@link YieldTree}.
          *
-         * @since 13
+         * @since 14
          */
         YIELD(YieldTree.class);
 

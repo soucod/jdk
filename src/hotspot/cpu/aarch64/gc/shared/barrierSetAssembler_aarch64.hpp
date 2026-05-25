@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,21 +39,15 @@ class Node;
 
 enum class NMethodPatchingType {
   stw_instruction_and_data_patch,
-  conc_instruction_and_data_patch,
-  conc_data_patch
+  conc_instruction_and_data_patch
 };
 
 class BarrierSetAssembler: public CHeapObj<mtGC> {
-private:
-  void incr_allocated_bytes(MacroAssembler* masm,
-                            Register var_size_in_bytes, int con_size_in_bytes,
-                            Register t1 = noreg);
-
 public:
   virtual void arraycopy_prologue(MacroAssembler* masm, DecoratorSet decorators, bool is_oop,
                                   Register src, Register dst, Register count, RegSet saved_regs) {}
   virtual void arraycopy_epilogue(MacroAssembler* masm, DecoratorSet decorators, bool is_oop,
-                                  Register start, Register count, Register tmp, RegSet saved_regs) {}
+                                  Register start, Register count, Register tmp) {}
 
   virtual void copy_load_at(MacroAssembler* masm,
                             DecoratorSet decorators,
@@ -141,6 +135,7 @@ public:
                                                   OptoReg::Name opto_reg);
   OptoReg::Name refine_register(const Node* node,
                                 OptoReg::Name opto_reg);
+  virtual void try_resolve_weak_handle_in_c2(MacroAssembler* masm, Register obj, Register tmp, Label& slow_path);
 #endif // COMPILER2
 };
 

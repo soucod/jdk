@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,29 +22,41 @@
  */
 
 /*
- * @test id=ZSinglegen
+ * @test id=COH
  * @bug 8232069
  * @requires vm.cds
  * @requires vm.bits == 64
- * @requires vm.gc.ZSinglegen
+ * @requires vm.gc.Z
  * @requires vm.gc.Serial
  * @requires vm.gc == null
  * @library /test/lib /test/hotspot/jtreg/runtime/cds/appcds
  * @compile test-classes/Hello.java
- * @run driver TestZGCWithCDS -XX:-ZGenerational
+ * @comment Only run if COH is unset or enabled.
+ * @requires vm.opt.UseCompactObjectHeaders != "false"
+ * @comment Driver sets compressed oops/class pointers, jtreg overrides will cause problems.
+            Only run the test if the flags are not set via the command line.
+ * @requires vm.opt.UseCompressedOops == null
+ * @requires vm.opt.UseCompressedClassPointers == null
+ * @run driver TestZGCWithCDS true
  */
 
 /*
- * @test id=ZGenerational
+ * @test id=NO-COH
  * @bug 8232069
  * @requires vm.cds
  * @requires vm.bits == 64
- * @requires vm.gc.ZGenerational
+ * @requires vm.gc.Z
  * @requires vm.gc.Serial
  * @requires vm.gc == null
  * @library /test/lib /test/hotspot/jtreg/runtime/cds/appcds
  * @compile test-classes/Hello.java
- * @run driver TestZGCWithCDS -XX:+ZGenerational
+ * @comment Only run if COH is unset or disabled.
+ * @requires vm.opt.UseCompactObjectHeaders != "true"
+ * @comment Driver sets compressed oops/class pointers, jtreg overrides will cause problems.
+            Only run the test if the flags are not set via the command line.
+ * @requires vm.opt.UseCompressedOops == null
+ * @requires vm.opt.UseCompressedClassPointers == null
+ * @run driver TestZGCWithCDS false
  */
 
 import jdk.test.lib.Platform;
@@ -55,14 +67,15 @@ public class TestZGCWithCDS {
     public final static String UNABLE_TO_USE_ARCHIVE = "Unable to use shared archive.";
     public final static String ERR_MSG = "The saved state of UseCompressedOops and UseCompressedClassPointers is different from runtime, CDS will be disabled.";
     public static void main(String... args) throws Exception {
-         String zGenerational = args[0];
+         boolean compactHeadersOn = Boolean.valueOf(args[0]);
+         String compactHeaders = "-XX:" + (compactHeadersOn ? "+" : "-") + "UseCompactObjectHeaders";
          String helloJar = JarBuilder.build("hello", "Hello");
          System.out.println("0. Dump with ZGC");
          OutputAnalyzer out = TestCommon
                                   .dump(helloJar,
                                         new String[] {"Hello"},
                                         "-XX:+UseZGC",
-                                        zGenerational,
+                                        compactHeaders,
                                         "-Xlog:cds");
          out.shouldContain("Dumping shared data to file:");
          out.shouldHaveExitValue(0);
@@ -71,7 +84,7 @@ public class TestZGCWithCDS {
          out = TestCommon
                    .exec(helloJar,
                          "-XX:+UseZGC",
-                         zGenerational,
+                         compactHeaders,
                          "-Xlog:cds",
                          "Hello");
          out.shouldContain(HELLO);
@@ -83,6 +96,7 @@ public class TestZGCWithCDS {
                          "-XX:-UseZGC",
                          "-XX:+UseCompressedOops",           // in case turned off by vmoptions
                          "-XX:+UseCompressedClassPointers",  // by jtreg
+                         compactHeaders,
                          "-Xlog:cds",
                          "Hello");
          out.shouldContain(UNABLE_TO_USE_ARCHIVE);
@@ -95,6 +109,7 @@ public class TestZGCWithCDS {
                          "-XX:+UseSerialGC",
                          "-XX:-UseCompressedOops",
                          "-XX:-UseCompressedClassPointers",
+                         compactHeaders,
                          "-Xlog:cds",
                          "Hello");
          out.shouldContain(UNABLE_TO_USE_ARCHIVE);
@@ -107,6 +122,7 @@ public class TestZGCWithCDS {
                          "-XX:+UseSerialGC",
                          "-XX:-UseCompressedOops",
                          "-XX:+UseCompressedClassPointers",
+                         compactHeaders,
                          "-Xlog:cds",
                          "Hello");
          out.shouldContain(HELLO);
@@ -118,6 +134,7 @@ public class TestZGCWithCDS {
                          "-XX:+UseSerialGC",
                          "-XX:+UseCompressedOops",
                          "-XX:-UseCompressedClassPointers",
+                         compactHeaders,
                          "-Xlog:cds",
                          "Hello");
          out.shouldContain(UNABLE_TO_USE_ARCHIVE);
@@ -130,6 +147,7 @@ public class TestZGCWithCDS {
                          "-XX:+UseSerialGC",
                          "-XX:+UseCompressedOops",
                          "-XX:+UseCompressedClassPointers",
+                         compactHeaders,
                          "-Xlog:cds",
                          "Hello");
          out.shouldContain(UNABLE_TO_USE_ARCHIVE);
@@ -143,6 +161,7 @@ public class TestZGCWithCDS {
                          "-XX:+UseSerialGC",
                          "-XX:-UseCompressedOops",
                          "-XX:+UseCompressedClassPointers",
+                         compactHeaders,
                          "-Xlog:cds");
          out.shouldContain("Dumping shared data to file:");
          out.shouldHaveExitValue(0);
@@ -151,7 +170,7 @@ public class TestZGCWithCDS {
          out = TestCommon
                    .exec(helloJar,
                          "-XX:+UseZGC",
-                         zGenerational,
+                         compactHeaders,
                          "-Xlog:cds",
                          "Hello");
          out.shouldContain(HELLO);

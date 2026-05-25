@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@
 #include "memory/iterator.hpp"
 #include "memory/memRegion.hpp"
 #include "oops/markWord.hpp"
+#include "runtime/atomic.hpp"
 #include "runtime/mutexLocker.hpp"
 #include "utilities/align.hpp"
 #include "utilities/macros.hpp"
@@ -40,9 +41,6 @@
 // up the generation abstraction. It includes specific
 // implementations for keeping track of free and used space,
 // for iterating over objects and free blocks, etc.
-
-// Forward decls.
-class GenSpaceMangler;
 
 // A space in which the free area is contiguous.  It therefore supports
 // faster allocation, and compaction.
@@ -56,11 +54,7 @@ class ContiguousSpace: public CHeapObj<mtGC> {
 private:
   HeapWord* _bottom;
   HeapWord* _end;
-  HeapWord* _top;
-  // A helper for mangling the unused area of the space in debug builds.
-  GenSpaceMangler* _mangler;
-
-  GenSpaceMangler* mangler() { return _mangler; }
+  Atomic<HeapWord*> _top;
 
   // Allocation helpers (return null if full).
   inline HeapWord* allocate_impl(size_t word_size);
@@ -68,13 +62,15 @@ private:
 
 public:
   ContiguousSpace();
-  ~ContiguousSpace();
 
   // Accessors
   HeapWord* bottom() const         { return _bottom; }
-  HeapWord* end() const            { return _end;    }
+  HeapWord* end() const            { return _end; }
+  HeapWord* top() const            { return _top.load_relaxed();    }
+
   void set_bottom(HeapWord* value) { _bottom = value; }
   void set_end(HeapWord* value)    { _end = value; }
+  void set_top(HeapWord* value)    { _top.store_relaxed(value); }
 
   // Testers
   bool is_empty() const              { return used() == 0; }
@@ -99,55 +95,32 @@ public:
   size_t free()     const { return byte_size(top(),    end()); }
 
   void print() const;
-  void print_on(outputStream* st) const;
+  void print_on(outputStream* st, const char* prefix) const;
 
   // Initialization.
   // "initialize" should be called once on a space, before it is used for
   // any purpose.  The "mr" arguments gives the bounds of the space, and
   // the "clear_space" argument should be true unless the memory in "mr" is
   // known to be zeroed.
-  void initialize(MemRegion mr, bool clear_space, bool mangle_space);
+  void initialize(MemRegion mr, bool clear_space);
 
   // The "clear" method must be called on a region that may have
   // had allocation performed in it, but is now to be considered empty.
   void clear(bool mangle_space);
 
-  // Accessors
-  HeapWord* top() const            { return _top;    }
-  void set_top(HeapWord* value)    { _top = value; }
-
-  // Used to save the space's current top for later use during mangling.
-  void set_top_for_allocations() PRODUCT_RETURN;
-
-  // For detecting GC bugs.  Should only be called at GC boundaries, since
-  // some unused space may be used as scratch space during GC's.
-  // We also call this when expanding a space to satisfy an allocation
-  // request. See bug #4668531
-  // Mangle regions in the space from the current top up to the
-  // previously mangled part of the space.
   void mangle_unused_area() PRODUCT_RETURN;
-  // Mangle [top, end)
-  void mangle_unused_area_complete() PRODUCT_RETURN;
-
-  // Do some sparse checking on the area that should have been mangled.
-  void check_mangled_unused_area(HeapWord* limit) PRODUCT_RETURN;
-  // Check the complete area that should have been mangled.
-  // This code may be null depending on the macro DEBUG_MANGLING.
-  void check_mangled_unused_area_complete() PRODUCT_RETURN;
+  void mangle_unused_area(MemRegion mr) PRODUCT_RETURN;
 
   MemRegion used_region() const { return MemRegion(bottom(), top()); }
 
   // Allocation (return null if full).  Assumes the caller has established
   // mutually exclusive access to the space.
-  virtual HeapWord* allocate(size_t word_size);
+  HeapWord* allocate(size_t word_size);
   // Allocation (return null if full).  Enforces mutual exclusion internally.
-  virtual HeapWord* par_allocate(size_t word_size);
+  HeapWord* par_allocate(size_t word_size);
 
   // Iteration
   void object_iterate(ObjectClosure* blk);
-
-  // Addresses for inlined allocation
-  HeapWord** top_addr() { return &_top; }
 
   // Debugging
   void verify() const;
