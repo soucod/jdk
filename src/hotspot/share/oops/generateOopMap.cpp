@@ -1168,42 +1168,46 @@ void GenerateOopMap::interp_bb(BasicBlock *bb) {
 }
 
 void GenerateOopMap::do_exception_edge(BytecodeStream* itr) {
-  // Only check exception edge, if bytecode can trap
-  if (!Bytecodes::can_trap(itr->code())) return;
-  switch (itr->code()) {
-    case Bytecodes::_aload_0:
-      // These bytecodes can trap for rewriting.  We need to assume that
-      // they do not throw exceptions to make the monitor analysis work.
-      return;
 
-    case Bytecodes::_ireturn:
-    case Bytecodes::_lreturn:
-    case Bytecodes::_freturn:
-    case Bytecodes::_dreturn:
-    case Bytecodes::_areturn:
-    case Bytecodes::_return:
-      // If the monitor stack height is not zero when we leave the method,
-      // then we are either exiting with a non-empty stack or we have
-      // found monitor trouble earlier in our analysis.  In either case,
-      // assume an exception could be taken here.
-      if (_monitor_top == 0) {
+  // Only check exception edge, if bytecode can trap or if async exceptions can be thrown
+  // from any bytecode in the interpreter when single stepping.
+  if (!_all_exception_edges) {
+    if (!Bytecodes::can_trap(itr->code())) return;
+    switch (itr->code()) {
+      case Bytecodes::_aload_0:
+        // These bytecodes can trap for rewriting.  We need to assume that
+        // they do not throw exceptions to make the monitor analysis work.
         return;
-      }
-      break;
 
-    case Bytecodes::_monitorexit:
-      // If the monitor stack height is bad_monitors, then we have detected a
-      // monitor matching problem earlier in the analysis.  If the
-      // monitor stack height is 0, we are about to pop a monitor
-      // off of an empty stack.  In either case, the bytecode
-      // could throw an exception.
-      if (_monitor_top != bad_monitors && _monitor_top != 0) {
-        return;
-      }
-      break;
+      case Bytecodes::_ireturn:
+      case Bytecodes::_lreturn:
+      case Bytecodes::_freturn:
+      case Bytecodes::_dreturn:
+      case Bytecodes::_areturn:
+      case Bytecodes::_return:
+        // If the monitor stack height is not zero when we leave the method,
+        // then we are either exiting with a non-empty stack or we have
+        // found monitor trouble earlier in our analysis.  In either case,
+        // assume an exception could be taken here.
+        if (_monitor_top == 0) {
+          return;
+        }
+        break;
 
-    default:
-      break;
+      case Bytecodes::_monitorexit:
+        // If the monitor stack height is bad_monitors, then we have detected a
+        // monitor matching problem earlier in the analysis.  If the
+        // monitor stack height is 0, we are about to pop a monitor
+        // off of an empty stack.  In either case, the bytecode
+        // could throw an exception.
+        if (_monitor_top != bad_monitors && _monitor_top != 0) {
+          return;
+        }
+        break;
+
+      default:
+        break;
+    }
   }
 
   if (_has_exceptions) {
@@ -2055,12 +2059,12 @@ void GenerateOopMap::print_time() {
 //
 //  ============ Main Entry Point ===========
 //
-GenerateOopMap::GenerateOopMap(const methodHandle& method) {
+GenerateOopMap::GenerateOopMap(const methodHandle& method, bool all_exception_edges) :
   // We have to initialize all variables here, that can be queried directly
-  _method = method;
-  _max_locals=0;
-  _init_vars = nullptr;
-}
+  _method(method),
+  _max_locals(0),
+  _all_exception_edges(all_exception_edges),
+  _init_vars(nullptr) {}
 
 bool GenerateOopMap::compute_map(Thread* current) {
 #ifndef PRODUCT
@@ -2187,7 +2191,7 @@ void GenerateOopMap::result_for_basicblock(int bci) {
   // Find basicblock and report results
   BasicBlock* bb = get_basic_block_containing(bci);
   guarantee(bb != nullptr, "no basic block for bci");
-  assert(bb->is_reachable(), "getting result from unreachable basicblock %d", bci);
+  assert(bb->is_reachable(), "getting result from unreachable basicblock at bci %d", bci);
   bb->set_changed(true);
   interp_bb(bb);
 }
@@ -2238,9 +2242,9 @@ void GenerateOopMap::rewrite_refval_conflicts()
   // Tracing flag
   _did_rewriting = true;
 
-  if (log_is_enabled(Trace, generateoopmap)) {
+  if (log_is_enabled(Debug, generateoopmap)) {
     ResourceMark rm;
-    LogStream st(Log(generateoopmap)::trace());
+    LogStream st(Log(generateoopmap)::debug());
     st.print_cr("ref/value conflict for method %s - bytecodes are getting rewritten", method()->name()->as_C_string());
     method()->print_on(&st);
     method()->print_codes_on(&st);
@@ -2498,32 +2502,9 @@ void GenerateOopMap::update_ret_adr_at_TOS(int bci, int delta) {
 
 // ===================================================================
 
-#ifndef PRODUCT
-int ResolveOopMapConflicts::_nof_invocations  = 0;
-int ResolveOopMapConflicts::_nof_rewrites     = 0;
-int ResolveOopMapConflicts::_nof_relocations  = 0;
-#endif
-
 methodHandle ResolveOopMapConflicts::do_potential_rewrite(TRAPS) {
   if (!compute_map(THREAD)) {
     THROW_HANDLE_(exception(), methodHandle());
   }
-
-#ifndef PRODUCT
-  // Tracking and statistics
-  if (PrintRewrites) {
-    _nof_invocations++;
-    if (did_rewriting()) {
-      _nof_rewrites++;
-      if (did_relocation()) _nof_relocations++;
-      tty->print("Method was rewritten %s: ", (did_relocation()) ? "and relocated" : "");
-      method()->print_value(); tty->cr();
-      tty->print_cr("Cand.: %d rewrts: %d (%d%%) reloc.: %d (%d%%)",
-          _nof_invocations,
-          _nof_rewrites,    (_nof_rewrites    * 100) / _nof_invocations,
-          _nof_relocations, (_nof_relocations * 100) / _nof_invocations);
-    }
-  }
-#endif
   return methodHandle(THREAD, method());
 }
