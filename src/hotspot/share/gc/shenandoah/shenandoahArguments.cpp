@@ -152,7 +152,7 @@ void ShenandoahArguments::initialize() {
 
   // Record more information about previous cycles for improved debugging pleasure
   if (FLAG_IS_DEFAULT(LogEventsBufferEntries)) {
-    FLAG_SET_DEFAULT(LogEventsBufferEntries, 250);
+    FLAG_SET_DEFAULT(LogEventsBufferEntries, NOT_DEBUG(70) DEBUG_ONLY(250));
   }
 
   if ((InitialHeapSize == MaxHeapSize) && ShenandoahUncommit) {
@@ -198,6 +198,7 @@ void ShenandoahArguments::initialize() {
         ShenandoahAllocRateSampleWindow));
   }
 
+#ifdef _LP64
   if (Arguments::is_valhalla_enabled()) {
     // Flat atomic payloads may contain embedded oops. Current Valhalla code does not handle
     // it well, missing the GC barriers. As the temporary kludge, disable compressed oops:
@@ -206,6 +207,7 @@ void ShenandoahArguments::initialize() {
     log_warning(gc)("Shenandoah disables compressed oops to avoid breaking with Valhalla");
     FLAG_SET_ERGO(UseCompressedOops, false);
   }
+#endif
 
   FullGCForwarding::initialize_flags(MaxHeapSize);
 }
@@ -238,11 +240,17 @@ void ShenandoahArguments::initialize_alignments() {
   }
 }
 
+void ShenandoahArguments::initialize_heap_flags_and_sizes() {
+  GCArguments::initialize_heap_flags_and_sizes();
+
+  FLAG_SET_ERGO_IF_DEFAULT(SoftMaxHeapSize, MaxHeapSize);
+}
+
 CollectedHeap* ShenandoahArguments::create_heap() {
   if (strcmp(ShenandoahGCMode, "generational") != 0) {
     // Not generational
-    return new ShenandoahHeap(new ShenandoahCollectorPolicy());
+    return new ShenandoahHeap();
   } else {
-    return new ShenandoahGenerationalHeap(new ShenandoahCollectorPolicy());
+    return new ShenandoahGenerationalHeap();
   }
 }
