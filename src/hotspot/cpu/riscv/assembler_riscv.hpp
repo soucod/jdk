@@ -2834,6 +2834,16 @@ enum Nf {
   INSN(vaesdm_vv,   0b1110111, 0b010, 0b00000, 0b101000);
   INSN(vaesdf_vv,   0b1110111, 0b010, 0b00001, 0b101000);
 
+  // Vector AES instructions - scalar form (Zvkned extension)
+  // .vs broadcasts vs2 element group 0 to all element groups in vd,
+  // allowing an m1 round key to be applied to a VL>4 data group
+  // without key splat.
+  INSN(vaesz_vs,   0b1110111, 0b010, 0b00111, 0b101001);
+  INSN(vaesem_vs,  0b1110111, 0b010, 0b00010, 0b101001);
+  INSN(vaesef_vs,  0b1110111, 0b010, 0b00011, 0b101001);
+  INSN(vaesdm_vs,  0b1110111, 0b010, 0b00000, 0b101001);
+  INSN(vaesdf_vs,  0b1110111, 0b010, 0b00001, 0b101001);
+
   INSN(vclz_v,  0b1010111, 0b010, 0b01100, 0b010010); // count leading zeros
   INSN(vctz_v,  0b1010111, 0b010, 0b01101, 0b010010); // count trailing zeros
 
@@ -3912,19 +3922,6 @@ public:
     _lui(Rd, imm);
   }
 
-
-// Cache Management Operations
-// These instruction may be turned off for user space.
-  // Zicboz
-  void cbo_zero(Register Rs1) {
-    assert(UseZicboz, "sanity");
-    unsigned insn = 0;
-    patch((address)&insn, 6,  0, 0b0001111);
-    patch((address)&insn, 14, 12, 0b010);
-    patch_reg((address)&insn, 15, Rs1);
-    patch((address)&insn, 31, 20, 0b0000000000100);
-    emit(insn);
-  }
 
  private:
   enum PREFETCH_FUNCT : unsigned int {
