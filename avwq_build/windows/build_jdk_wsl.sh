@@ -2,6 +2,8 @@ cd ..
 # 赋予可执行权限
 chmod +x configure
 
+# 安装依赖
+
 sudo rm /usr/lib64/ccache/gcc
 sudo rm /usr/lib64/ccache/g++
 # 有很多配置项，可以参看《深入理解JAVA虚拟机》，这里不说深入介绍。
